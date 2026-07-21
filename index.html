@@ -19,8 +19,6 @@
       --bg: #0f172a;
       --card-bg: #1e293b;
       --accent: #38bdf8;
-      --sys-color: #f43f5e;
-      --dia-color: #3b82f6;
       --text: #f8fafc;
       --text-dim: #94a3b8;
       --border: #334155;
@@ -150,7 +148,8 @@
       border: 1px solid var(--border);
       text-align: center;
     }
-    .stat-val { font-size: 1.2rem; font-weight: 700; color: var(--text); margin-top: 0.2rem; }
+    .stat-title { font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 0.25rem; }
+    .stat-val { font-size: 1.1rem; font-weight: 700; color: var(--text); }
     .stat-sub { font-size: 0.75rem; color: var(--text-dim); margin-top: 0.1rem; }
 
     .actions-row { display: flex; gap: 0.5rem; margin-top: 1rem; }
@@ -206,26 +205,31 @@
   <!-- TAB 2: Trend Graph -->
   <div id="charts-tab" class="tab-content">
     <div class="card">
-      <h2 style="font-size: 1rem; margin-bottom: 1rem; color: var(--text-dim);">Recent Trends (Last 20)</h2>
-      <canvas id="bpChart" width="400" height="280"></canvas>
+      <h2 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-dim);">Systolic Trends (AM vs PM)</h2>
+      <canvas id="sysChart" width="400" height="200"></canvas>
+    </div>
+    <div class="card">
+      <h2 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-dim);">Diastolic Trends (AM vs PM)</h2>
+      <canvas id="diaChart" width="400" height="200"></canvas>
     </div>
   </div>
 
   <!-- TAB 3: Averages -->
   <div id="stats-tab" class="tab-content">
     <div class="card">
-      <h2 style="font-size: 1rem; color: var(--text-dim);">7-Day Average</h2>
+      <h2 style="font-size: 1rem; color: var(--text-dim);">7-Day Averages</h2>
       <div class="stat-grid" id="week-stats"></div>
     </div>
     <div class="card">
-      <h2 style="font-size: 1rem; color: var(--text-dim);">30-Day Average</h2>
+      <h2 style="font-size: 1rem; color: var(--text-dim);">30-Day Averages</h2>
       <div class="stat-grid" id="month-stats"></div>
     </div>
   </div>
 
   <script>
     const STORAGE_KEY = 'bp_readings_data';
-    let chartInstance = null;
+    let sysChartInstance = null;
+    let diaChartInstance = null;
 
     // Helper: Categorize BP
     function getCategory(sys, dia) {
@@ -247,7 +251,7 @@
       event.target.classList.add('active');
       document.getElementById(tabId).classList.add('active');
 
-      if (tabId === 'charts-tab') renderChart();
+      if (tabId === 'charts-tab') renderCharts();
       if (tabId === 'stats-tab') renderAverages();
     }
 
@@ -264,13 +268,16 @@
 
       listEl.innerHTML = logs.map((item, index) => {
         const cat = getCategory(item.sys, item.dia);
-        const dateStr = new Date(item.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+        const dateObj = new Date(item.timestamp);
+        const dateStr = dateObj.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+        const timeOfDay = dateObj.getHours() < 12 ? '☀️ AM' : '🌙 PM';
         
         return `
           <div class="log-item">
             <div>
               <div class="readings">${item.sys} / ${item.dia} <span class="pulse">${item.pulse ? '❤️ ' + item.pulse : ''}</span></div>
               <span class="badge ${cat.class}">${cat.label}</span>
+              <span style="font-size:0.7rem; color: var(--text-dim); margin-left:0.3rem;">${timeOfDay}</span>
             </div>
             <div style="text-align: right;">
               <div class="date">${dateStr}</div>
@@ -314,8 +321,11 @@
     function exportCSV() {
       const logs = getLogs();
       if (logs.length === 0) return alert('No data to export.');
-      let csv = 'Timestamp,Systolic,Diastolic,Pulse\n';
-      logs.forEach(l => { csv += `"${l.timestamp}",${l.sys},${l.dia},${l.pulse || ''}\n`; });
+      let csv = 'Timestamp,TimeOfDay,Systolic,Diastolic,Pulse\n';
+      logs.forEach(l => {
+        const ampm = new Date(l.timestamp).getHours() < 12 ? 'AM' : 'PM';
+        csv += `"${l.timestamp}",${ampm},${l.sys},${l.dia},${l.pulse || ''}\n`;
+      });
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -324,47 +334,74 @@
       a.click();
     }
 
-    // Render Trend Chart
-    function renderChart() {
-      const logs = getLogs().slice(0, 20).reverse(); // Chronological (up to 20)
-      const ctx = document.getElementById('bpChart').getContext('2d');
+    // Render Trend Charts
+    function renderCharts() {
+      const logs = getLogs().slice(0, 30).reverse(); // Chronological (up to 30)
 
-      if (chartInstance) chartInstance.destroy();
+      if (sysChartInstance) sysChartInstance.destroy();
+      if (diaChartInstance) diaChartInstance.destroy();
 
       if (logs.length === 0) return;
 
       const labels = logs.map(l => new Date(l.timestamp).toLocaleDateString([], { month: 'numeric', day: 'numeric' }));
-      const sysData = logs.map(l => l.sys);
-      const diaData = logs.map(l => l.dia);
+      
+      const amSys = logs.map(l => new Date(l.timestamp).getHours() < 12 ? l.sys : null);
+      const pmSys = logs.map(l => new Date(l.timestamp).getHours() >= 12 ? l.sys : null);
+      
+      const amDia = logs.map(l => new Date(l.timestamp).getHours() < 12 ? l.dia : null);
+      const pmDia = logs.map(l => new Date(l.timestamp).getHours() >= 12 ? l.dia : null);
 
-      chartInstance = new Chart(ctx, {
+      const chartOptions = {
+        responsive: true,
+        spanGaps: true,
+        plugins: { legend: { labels: { color: '#94a3b8' } } },
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+        }
+      };
+
+      // Systolic Chart
+      const sysCtx = document.getElementById('sysChart').getContext('2d');
+      sysChartInstance = new Chart(sysCtx, {
         type: 'line',
         data: {
           labels: labels,
           datasets: [
-            { label: 'Systolic', data: sysData, borderColor: '#f43f5e', backgroundColor: '#f43f5e', tension: 0.3 },
-            { label: 'Diastolic', data: diaData, borderColor: '#3b82f6', backgroundColor: '#3b82f6', tension: 0.3 }
+            { label: 'Morning (AM)', data: amSys, borderColor: '#fef08a', backgroundColor: '#fef08a', tension: 0.2 },
+            { label: 'Night (PM)', data: pmSys, borderColor: '#f43f5e', backgroundColor: '#f43f5e', tension: 0.2 }
           ]
         },
-        options: {
-          responsive: true,
-          plugins: { legend: { labels: { color: '#94a3b8' } } },
-          scales: {
-            x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-            y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
-          }
-        }
+        options: chartOptions
+      });
+
+      // Diastolic Chart
+      const diaCtx = document.getElementById('diaChart').getContext('2d');
+      diaChartInstance = new Chart(diaCtx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: 'Morning (AM)', data: amDia, borderColor: '#38bdf8', backgroundColor: '#38bdf8', tension: 0.2 },
+            { label: 'Night (PM)', data: pmDia, borderColor: '#818cf8', backgroundColor: '#818cf8', tension: 0.2 }
+          ]
+        },
+        options: chartOptions
       });
     }
 
-    // Calculate & Render Averages
+    // Calculate & Render Morning / Night Averages
     function renderAverages() {
       const logs = getLogs();
       const now = new Date();
 
-      const calcAvg = (days) => {
+      const calcTimePeriodAvg = (days, isAM) => {
         const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-        const filtered = logs.filter(l => new Date(l.timestamp) >= cutoff);
+        const filtered = logs.filter(l => {
+          const d = new Date(l.timestamp);
+          const hour = d.getHours();
+          return d >= cutoff && (isAM ? hour < 12 : hour >= 12);
+        });
         
         if (filtered.length === 0) return null;
 
@@ -381,29 +418,36 @@
         };
       };
 
-      const renderGrid = (elementId, stats) => {
-        const el = document.getElementById(elementId);
+      const buildCardHTML = (title, stats) => {
         if (!stats) {
-          el.innerHTML = '<p style="color: var(--text-dim); grid-column: span 2; padding: 0.5rem 0;">No readings in this period.</p>';
-          return;
+          return `
+            <div class="stat-card">
+              <div class="stat-title">${title}</div>
+              <div class="stat-sub" style="padding: 0.5rem 0;">No readings</div>
+            </div>
+          `;
         }
         const cat = getCategory(stats.sys, stats.dia);
-        el.innerHTML = `
+        return `
           <div class="stat-card">
-            <div class="stat-sub">AVG BP</div>
+            <div class="stat-title">${title}</div>
             <div class="stat-val">${stats.sys}/${stats.dia}</div>
             <span class="badge ${cat.class}">${cat.label}</span>
-          </div>
-          <div class="stat-card">
-            <div class="stat-sub">AVG PULSE</div>
-            <div class="stat-val">${stats.pulse} <span style="font-size:0.8rem">BPM</span></div>
-            <div class="stat-sub" style="margin-top:0.4rem">${stats.count} reading(s)</div>
+            <div class="stat-sub" style="margin-top:0.3rem">Pulse: ${stats.pulse} BPM (${stats.count} logs)</div>
           </div>
         `;
       };
 
-      renderGrid('week-stats', calcAvg(7));
-      renderGrid('month-stats', calcAvg(30));
+      const renderSection = (elementId, days) => {
+        const amStats = calcTimePeriodAvg(days, true);
+        const pmStats = calcTimePeriodAvg(days, false);
+        document.getElementById(elementId).innerHTML = 
+          buildCardHTML('☀️ MORNING (AM)', amStats) + 
+          buildCardHTML('🌙 NIGHT (PM)', pmStats);
+      };
+
+      renderSection('week-stats', 7);
+      renderSection('month-stats', 30);
     }
 
     // Initial Load
