@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BP Tracker">
+  <title>BP Tracker</title>
+  
+  <!-- App Icon placeholder for iOS Home Screen -->
+  <link rel="apple-touch-icon" href="https://fav.farm/🫀">
+  <link rel="icon" href="https://fav.farm/🫀">
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #38bdf8;
+      --text: #f8fafc;
+      --text-dim: #94a3b8;
+      --border: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 1rem;
+      padding-top: calc(1rem + env(safe-area-inset-top));
+      padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; text-align: center; }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+      border: 1px solid var(--border);
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+    label { font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+    
+    input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      width: 100%;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+
+    .input-row { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
+
+    button {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      padding: 0.85rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      width: 100%;
+      cursor: pointer;
+    }
+    button:active { opacity: 0.8; }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      padding: 0.5rem;
+    }
+
+    /* History List */
+    .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .log-item:last-child { border-bottom: none; }
+    .readings { font-size: 1.1rem; font-weight: 600; }
+    .pulse { font-size: 0.85rem; color: var(--text-dim); }
+    .date { font-size: 0.75rem; color: var(--text-dim); }
+    
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-top: 0.2rem;
+      display: inline-block;
+    }
+    .bg-normal { background: #166534; color: #4ade80; }
+    .bg-elevated { background: #854d0e; color: #fef08a; }
+    .bg-stage1 { background: #9a3412; color: #ffedd5; }
+    .bg-stage2 { background: #991b1b; color: #fecaca; }
+
+    .actions-row { display: flex; gap: 0.5rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+
+  <h1>Blood Pressure Log</h1>
+
+  <!-- Input Form -->
+  <div class="card">
+    <form id="bp-form">
+      <div class="input-row">
+        <div class="form-group">
+          <label for="sys">SYS (Top)</label>
+          <input type="number" id="sys" placeholder="120" required min="50" max="250" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label for="dia">DIA (Bottom)</label>
+          <input type="number" id="dia" placeholder="80" required min="30" max="150" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label for="pulse">Pulse</label>
+          <input type="number" id="pulse" placeholder="70" inputmode="numeric">
+        </div>
+      </div>
+      <button type="submit">Save Reading</button>
+    </form>
+  </div>
+
+  <!-- History -->
+  <div class="card">
+    <div class="history-header">
+      <h2>History</h2>
+      <span id="count" style="font-size: 0.85rem; color: var(--text-dim);">0 logs</span>
+    </div>
+    <div id="log-list"></div>
+  </div>
+
+  <!-- Data Management -->
+  <div class="actions-row">
+    <button class="btn-secondary" onclick="exportCSV()">Export CSV</button>
+    <button class="btn-secondary" onclick="clearData()">Clear All</button>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'bp_readings_data';
+
+    // Helper: Categorize BP Reading
+    function getCategory(sys, dia) {
+      if (sys < 120 && dia < 80) return { label: 'Normal', class: 'bg-normal' };
+      if (sys <= 129 && dia < 80) return { label: 'Elevated', class: 'bg-elevated' };
+      if (sys <= 139 || dia <= 89) return { label: 'Stage 1', class: 'bg-stage1' };
+      return { label: 'Stage 2', class: 'bg-stage2' };
+    }
+
+    // Get Data from LocalStorage
+    function getLogs() {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    }
+
+    // Render Logs to Screen
+    function render() {
+      const logs = getLogs();
+      const listEl = document.getElementById('log-list');
+      document.getElementById('count').textContent = `${logs.length} logs`;
+
+      if (logs.length === 0) {
+        listEl.innerHTML = '<p style="color: var(--text-dim); text-align: center; padding: 1rem 0;">No readings logged yet.</p>';
+        return;
+      }
+
+      listEl.innerHTML = logs.map((item, index) => {
+        const cat = getCategory(item.sys, item.dia);
+        const dateStr = new Date(item.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+        
+        return `
+          <div class="log-item">
+            <div>
+              <div class="readings">${item.sys} / ${item.dia} <span class="pulse">${item.pulse ? '❤️ ' + item.pulse : ''}</span></div>
+              <span class="badge ${cat.class}">${cat.label}</span>
+            </div>
+            <div style="text-align: right;">
+              <div class="date">${dateStr}</div>
+              <button class="btn-secondary" style="padding: 0.2rem 0.4rem; margin-top: 0.2rem;" onclick="deleteLog(${index})">✕</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Handle Form Submit
+    document.getElementById('bp-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const sys = parseInt(document.getElementById('sys').value);
+      const dia = parseInt(document.getElementById('dia').value);
+      const pulse = document.getElementById('pulse').value ? parseInt(document.getElementById('pulse').value) : null;
+
+      const newLog = { sys, dia, pulse, timestamp: new Date().toISOString() };
+      const logs = getLogs();
+      logs.unshift(newLog); // Add to top
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+
+      // Reset Form & Update View
+      document.getElementById('bp-form').reset();
+      render();
+    });
+
+    // Delete Single Reading
+    function deleteLog(index) {
+      const logs = getLogs();
+      logs.splice(index, 1);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+      render();
+    }
+
+    // Clear All
+    function clearData() {
+      if (confirm('Delete all stored blood pressure records?')) {
+        localStorage.removeItem(STORAGE_KEY);
+        render();
+      }
+    }
+
+    // Export to CSV for Doctors
+    function exportCSV() {
+      const logs = getLogs();
+      if (logs.length === 0) return alert('No data to export.');
+      
+      let csv = 'Timestamp,Systolic,Diastolic,Pulse\n';
+      logs.forEach(l => {
+        csv += `"${l.timestamp}",${l.sys},${l.dia},${l.pulse || ''}\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bp_log_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+    }
+
+    // Initial Load
+    render();
+  </script>
+</body>
+</html>
